@@ -90,7 +90,7 @@ function showLogin(message = "") {
     try {
       const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
         body: JSON.stringify({
           email: document.querySelector("#email").value.trim(),
           password: document.querySelector("#password").value,
