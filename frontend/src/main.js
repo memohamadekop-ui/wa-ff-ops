@@ -1,9 +1,10 @@
 import QRCode from "qrcode";
 import "./style.css";
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+const apiBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL || window.location.origin
+).replace(/\/+$/, "");
 const pageSize = 50;
-const configComplete = Boolean(apiBaseUrl);
 const root = document.querySelector("#app");
 let sessionToken = sessionStorage.getItem("wa-history-session");
 let connection = null;
@@ -74,15 +75,6 @@ function showLogin(message = "") {
     </main>`;
 
   const loginForm = document.querySelector("#login-form");
-  if (!configComplete) {
-    loginForm.querySelector("button").disabled = true;
-    loginForm.after(Object.assign(document.createElement("div"), {
-      className: "feedback feedback-error",
-      textContent: "Konfigurasi VITE_API_BASE_URL belum diisi.",
-    }));
-    return;
-  }
-
   loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = loginForm.querySelector("button");

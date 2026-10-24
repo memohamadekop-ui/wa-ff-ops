@@ -6,6 +6,16 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "cleanUrls": true
+    "cleanUrls": true,
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "wa-ff-ops-be",
+          "region": "asia-southeast1",
+          "pinTag": true
+        }
+      }
+    ]
   }
 }

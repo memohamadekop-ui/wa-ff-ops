@@ -10,7 +10,7 @@ The project has a static Vite frontend in `frontend/` and a separate persistent 
 
 ## Runtime requirements
 
-Run this on one persistent, unprivileged Node.js instance with Chromium/Puppeteer support and persistent storage. Do not use static Firebase Hosting or a scale-to-zero/serverless runtime for the WhatsApp client. Keep Chromium sandboxing enabled. The FE login is checked by the BE against Supabase `tb_user`; only `role_id = 1` accounts with valid bcrypt passwords are accepted. Never expose the OCC shared secret or Supabase key to the browser.
+Run the WhatsApp worker on one unprivileged Node.js instance with Chromium/Puppeteer support and persistent storage. Firebase Hosting serves the static frontend and rewrites `/api/**` to the Cloud Run service; it does not run the worker itself. Only `role_id = 1` accounts with valid bcrypt passwords can log in. Never expose the OCC shared secret or Supabase key to the browser.
 
 ## Setup
 
@@ -21,11 +21,14 @@ Run this on one persistent, unprivileged Node.js instance with Chromium/Puppetee
 5. Run `npm run dev` for local development, or `npm run build` then `npm start` on the persistent production host. The standalone Node process initializes the WhatsApp client automatically. Run exactly one application instance.
 6. Ensure `tb_user` is available through the server-only Supabase key and has bcrypt password hashes. Login permits only `role_id = 1`. Set `WA_HISTORY_ALLOWED_ORIGINS` on the BE and restart it.
 
-### Firebase frontend
+### Firebase Hosting frontend and Cloud Run API
 
-1. Copy `frontend/.env.example` to `frontend/.env` and set only the backend base URL. Do not put user passwords or backend secrets in this file.
-2. Build the static site with `cd frontend` then `npm install` and `npm run build`. Set Firebase Hosting's public directory to `frontend/dist` and deploy with `firebase deploy --only hosting`.
-3. On the BE, set `WA_HISTORY_ALLOWED_ORIGINS` to the exact Hosting origins (normally both `https://<project-id>.web.app` and `https://<project-id>.firebaseapp.com`). Never use `*` for CORS.
+1. Deploy the BE as the Cloud Run service `wa-ff-ops-be` in `asia-southeast1` (see the BE README). Set `WA_HISTORY_ALLOWED_ORIGINS` to the exact Hosting origins (normally both `https://<project-id>.web.app` and `https://<project-id>.firebaseapp.com`). Never use `*` for CORS.
+2. `firebase.json` rewrites `/api/**` to that Cloud Run service. Select the right Firebase project with `firebase use <project-id>`; the configured project here is `wa-ff-ops`.
+3. `frontend/.env.example` leaves `VITE_API_BASE_URL` empty so the frontend uses its own origin and the Hosting rewrite. Do not set it to a Cloud Shell URL or put backend secrets in the frontend.
+4. Build and deploy the frontend: `cd frontend`, `npm install`, `npm run build`, then from the repository root run `firebase deploy --only hosting`.
+
+Cloud Run needs billing enabled. It uses an ephemeral filesystem: to keep the linked WhatsApp session after instance replacement/redeploy, configure a persistent NFS/Filestore volume mounted at `/mnt/whatsapp-auth`. Without that volume the API can be tested, but WhatsApp may require scanning a new QR code after a restart. Keep one worker instance; multiple instances can race because the provided schema has no unique external-message constraint.
 
 The FE supports login against Supabase `tb_user`, QR display, connection status, connect/disconnect, sync, conversation/message search, pagination, and Excel export. The BE checks Laravel-compatible bcrypt hashes and only allows `role_id = 1`; it issues short-lived signed sessions. Passwords and Supabase keys never go to browser code. The UI does not include send/reply functionality.
 
