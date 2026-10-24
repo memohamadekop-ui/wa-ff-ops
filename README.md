@@ -21,9 +21,15 @@ Run this on one persistent, unprivileged Node.js instance with Chromium/Puppetee
 5. Run `npm run dev` for local development, or `npm run build` then `npm start` on the persistent production host. The standalone Node process initializes the WhatsApp client automatically. Run exactly one application instance.
 6. Forward only the protected API routes through the OCC PHP proxy. The proxy must authorize the OCC session and superadmin role before forwarding.
 
-### Local frontend example
+### Frontend demo on Firebase Hosting
 
-Open `http://localhost:3000/` while running `npm run dev`. The page displays the connection/QR status, conversations, message history, and search. Search results can be downloaded as an Excel workbook. It calls a development-only server proxy; the OCC secret is never sent to browser JavaScript. That proxy is disabled in production and rejects requests whose host is not localhost/loopback. Do not deploy this demo as an authenticated OCC UI; replace it with the authenticated OCC/PHP proxy integration.
+The `frontend/` directory contains a standalone static demo suitable for Firebase Hosting. In the Firebase CLI setup, set the public directory to `frontend`, answer `No` to the single-page-app rewrite (the demo is a single `index.html`), and answer `No` to automatic GitHub deployment if you deploy manually. Then deploy with `firebase deploy --only hosting`. It shows illustrative UI only and does not access WhatsApp or Supabase data.
+
+Do not add backend secrets to this static frontend. To display real OCC WhatsApp history, connect it through an authenticated OCC/PHP proxy that validates the session and role before forwarding requests to the backend. Never put the backend shared secret or Supabase key in browser code.
+
+### Local full-stack frontend example
+
+Open `http://localhost:3000/` while running `npm run dev`. The local Next.js demo displays the connection/QR status, conversations, message history, and search. Search results can be downloaded as an Excel workbook. It calls a development-only server proxy; the OCC secret is never sent to browser JavaScript. That proxy is disabled in production and rejects requests whose host is not localhost/loopback. Do not deploy this demo as an authenticated OCC UI; replace it with the authenticated OCC/PHP proxy integration.
 
 The demo proxy uses `WA_BACKEND_INTERNAL_URL` for its server-to-server requests. Set it to the local Next.js URL when using a port other than `3000`.
 
