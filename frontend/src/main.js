@@ -1,30 +1,11 @@
-import { initializeApp } from "firebase/app";
-import {
-  browserLocalPersistence,
-  getAuth,
-  onAuthStateChanged,
-  reload,
-  sendEmailVerification,
-  setPersistence,
-  signInWithEmailAndPassword,
-  signOut,
-} from "firebase/auth";
 import QRCode from "qrcode";
 import "./style.css";
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 const pageSize = 50;
-const configComplete =
-  Object.values(firebaseConfig).every(Boolean) && Boolean(apiBaseUrl);
+const configComplete = Boolean(apiBaseUrl);
 const root = document.querySelector("#app");
-let currentUser = null;
-let auth = null;
+let sessionToken = sessionStorage.getItem("wa-history-session");
 let connection = null;
 let conversations = [];
 let selectedConversation = null;
@@ -72,7 +53,7 @@ function statusLabel(status) {
   }[status] ?? "Tidak diketahui";
 }
 
-function showLogin(message = "", isError = true) {
+function showLogin(message = "") {
   window.clearInterval(statusTimer);
   root.innerHTML = `
     <main class="login-shell">
@@ -80,7 +61,7 @@ function showLogin(message = "", isError = true) {
         <div class="brand-mark">WA</div>
         <p class="eyebrow">OCC · HISTORY CONSOLE</p>
         <h1>WhatsApp History</h1>
-        <p class="muted">Masuk dengan akun yang sudah diizinkan administrator.</p>
+        <p class="muted">Masuk menggunakan akun administrator OCC.</p>
         <form id="login-form">
           <label for="email">Email</label>
           <input id="email" type="email" autocomplete="username" required>
@@ -88,74 +69,50 @@ function showLogin(message = "", isError = true) {
           <input id="password" type="password" autocomplete="current-password" required>
           <button class="button button-primary" type="submit">Masuk</button>
         </form>
-        ${message ? `<div id="login-message" class="feedback ${isError ? "feedback-error" : "feedback-success"}" role="status">${escapeHtml(message)}</div>` : ""}
-        <button id="verify-email" class="text-button hidden" type="button">Kirim email verifikasi</button>
+        ${message ? `<div id="login-message" class="feedback feedback-error" role="status">${escapeHtml(message)}</div>` : ""}
       </section>
     </main>`;
 
   const loginForm = document.querySelector("#login-form");
-  let loginMessage = document.querySelector("#login-message");
-  const verifyButton = document.querySelector("#verify-email");
   if (!configComplete) {
     loginForm.querySelector("button").disabled = true;
-    loginMessage = document.createElement("div");
-    loginMessage.id = "login-message";
-    loginMessage.className = "feedback feedback-error";
-    loginMessage.setAttribute("role", "status");
-    loginForm.after(loginMessage);
-    loginMessage.textContent =
-      "Konfigurasi FE belum lengkap. Isi nilai VITE_FIREBASE_* dan VITE_API_BASE_URL lalu build ulang.";
+    loginForm.after(Object.assign(document.createElement("div"), {
+      className: "feedback feedback-error",
+      textContent: "Konfigurasi VITE_API_BASE_URL belum diisi.",
+    }));
     return;
-  }
-
-  if (currentUser && !currentUser.emailVerified) {
-    document.querySelector("#email").value = currentUser.email ?? "";
-    verifyButton.classList.remove("hidden");
-    verifyButton.addEventListener("click", async () => {
-      try {
-        await sendEmailVerification(currentUser);
-        loginMessage.textContent = "Email verifikasi dikirim. Setelah memverifikasi email, tekan tombol ini lagi untuk memeriksa.";
-        loginMessage.className = "feedback feedback-success";
-        verifyButton.textContent = "Saya sudah verifikasi — periksa lagi";
-        verifyButton.onclick = async () => {
-          try {
-            await reload(currentUser);
-            if (!currentUser.emailVerified) {
-              loginMessage.textContent = "Email belum terverifikasi. Periksa email lalu coba lagi.";
-              return;
-            }
-            await currentUser.getIdToken(true);
-            window.location.reload();
-          } catch (error) {
-            loginMessage.textContent = error.message || "Status verifikasi belum dapat diperiksa.";
-            loginMessage.className = "feedback feedback-error";
-          }
-        };
-      } catch (error) {
-        loginMessage.textContent = error.message || "Email verifikasi gagal dikirim.";
-        loginMessage.className = "feedback feedback-error";
-      }
-    });
   }
 
   loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submit = loginForm.querySelector("button");
     submit.disabled = true;
-    loginMessage?.remove();
-    loginMessage = null;
     try {
-      await signInWithEmailAndPassword(
-        auth,
-        document.querySelector("#email").value.trim(),
-        document.querySelector("#password").value,
-      );
+      const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: document.querySelector("#email").value.trim(),
+          password: document.querySelector("#password").value,
+        }),
+        cache: "no-store",
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || typeof result.data?.token !== "string") {
+        throw new Error(result.error || `Login gagal (${response.status})`);
+      }
+      sessionToken = result.data.token;
+      sessionStorage.setItem("wa-history-session", sessionToken);
+      renderDashboard();
     } catch (error) {
-      loginMessage = document.createElement("div");
-      loginMessage.id = "login-message";
-      loginMessage.className = "feedback feedback-error";
-      loginMessage.setAttribute("role", "status");
-      loginForm.after(loginMessage);
+      let loginMessage = document.querySelector("#login-message");
+      if (!loginMessage) {
+        loginMessage = document.createElement("div");
+        loginMessage.id = "login-message";
+        loginMessage.className = "feedback feedback-error";
+        loginMessage.setAttribute("role", "status");
+        loginForm.after(loginMessage);
+      }
       loginMessage.textContent = error.message || "Login gagal.";
       submit.disabled = false;
     }
@@ -223,7 +180,11 @@ function renderDashboard() {
       <footer>WhatsApp History API · read-only · data disimpan di Supabase</footer>
     </main>`;
 
-  document.querySelector("#logout-button").addEventListener("click", () => void signOut(auth));
+  document.querySelector("#logout-button").addEventListener("click", () => {
+    sessionStorage.removeItem("wa-history-session");
+    sessionToken = null;
+    showLogin();
+  });
   document.querySelector("#refresh-button").addEventListener("click", () => void refreshStatus());
   document.querySelector("#connect-button").addEventListener("click", () => void runAction("connect"));
   document.querySelector("#disconnect-button").addEventListener("click", () => void runAction("disconnect"));
@@ -264,17 +225,22 @@ function showFeedback(message, isError = false) {
 }
 
 async function api(path, options = {}) {
-  if (!currentUser) throw new Error("Silakan masuk kembali.");
-  const token = await currentUser.getIdToken();
+  if (!sessionToken) throw new Error("Silakan masuk kembali.");
   const response = await fetch(`${apiBaseUrl}/api${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${sessionToken}`,
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...options.headers,
     },
     cache: "no-store",
   });
+  if (response.status === 401) {
+    sessionStorage.removeItem("wa-history-session");
+    sessionToken = null;
+    showLogin("Sesi sudah berakhir. Silakan masuk lagi.");
+    throw new Error("Sesi sudah berakhir. Silakan masuk lagi.");
+  }
   if (!response.ok) {
     let message = `Permintaan gagal (${response.status})`;
     try {
@@ -444,11 +410,10 @@ async function searchChat(event) {
 async function exportSearch(query, conversationId) {
   if (!query) return showFeedback("Isi kata pencarian terlebih dahulu.", true);
   try {
-    const token = await currentUser.getIdToken();
     const params = new URLSearchParams({ q: query });
     if (conversationId) params.set("conversationId", conversationId);
     const response = await fetch(`${apiBaseUrl}/api/wa/messages/export?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${sessionToken}` },
       cache: "no-store",
     });
     if (!response.ok) {
@@ -508,22 +473,14 @@ async function withBusy(action) {
   }
 }
 
-if (!configComplete) {
+if (!sessionToken) {
   showLogin();
 } else {
-  const firebaseApp = initializeApp(firebaseConfig);
-  auth = getAuth(firebaseApp);
-  await setPersistence(auth, browserLocalPersistence);
-  onAuthStateChanged(auth, (user) => {
-    currentUser = user;
-    if (!user) {
-      showLogin();
-      return;
-    }
-    if (!user.emailVerified) {
-      showLogin("Email belum diverifikasi. Minta email verifikasi sebelum mengakses riwayat.", true);
-      return;
-    }
-    renderDashboard();
-  });
+  api("/wa/status")
+    .then(() => renderDashboard())
+    .catch(() => {
+      sessionStorage.removeItem("wa-history-session");
+      sessionToken = null;
+      showLogin("Sesi sudah berakhir. Silakan masuk lagi.");
+    });
 }
