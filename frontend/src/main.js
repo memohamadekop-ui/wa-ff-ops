@@ -88,16 +88,21 @@ function showLogin(message = "", isError = true) {
           <input id="password" type="password" autocomplete="current-password" required>
           <button class="button button-primary" type="submit">Masuk</button>
         </form>
-        <div id="login-message" class="feedback ${isError ? "feedback-error" : "feedback-success"}" role="status">${escapeHtml(message)}</div>
+        ${message ? `<div id="login-message" class="feedback ${isError ? "feedback-error" : "feedback-success"}" role="status">${escapeHtml(message)}</div>` : ""}
         <button id="verify-email" class="text-button hidden" type="button">Kirim email verifikasi</button>
       </section>
     </main>`;
 
   const loginForm = document.querySelector("#login-form");
-  const loginMessage = document.querySelector("#login-message");
+  let loginMessage = document.querySelector("#login-message");
   const verifyButton = document.querySelector("#verify-email");
   if (!configComplete) {
     loginForm.querySelector("button").disabled = true;
+    loginMessage = document.createElement("div");
+    loginMessage.id = "login-message";
+    loginMessage.className = "feedback feedback-error";
+    loginMessage.setAttribute("role", "status");
+    loginForm.after(loginMessage);
     loginMessage.textContent =
       "Konfigurasi FE belum lengkap. Isi nilai VITE_FIREBASE_* dan VITE_API_BASE_URL lalu build ulang.";
     return;
@@ -137,7 +142,8 @@ function showLogin(message = "", isError = true) {
     event.preventDefault();
     const submit = loginForm.querySelector("button");
     submit.disabled = true;
-    loginMessage.textContent = "";
+    loginMessage?.remove();
+    loginMessage = null;
     try {
       await signInWithEmailAndPassword(
         auth,
@@ -145,8 +151,12 @@ function showLogin(message = "", isError = true) {
         document.querySelector("#password").value,
       );
     } catch (error) {
-      loginMessage.textContent = error.message || "Login gagal.";
+      loginMessage = document.createElement("div");
+      loginMessage.id = "login-message";
       loginMessage.className = "feedback feedback-error";
+      loginMessage.setAttribute("role", "status");
+      loginForm.after(loginMessage);
+      loginMessage.textContent = error.message || "Login gagal.";
       submit.disabled = false;
     }
   });
