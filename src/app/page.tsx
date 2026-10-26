@@ -66,6 +66,14 @@ function formatDate(value: string | null) {
       }).format(date);
 }
 
+function exportFileName(query: string) {
+  const safeQuery = query
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return `whatsapp-search-results_search_${safeQuery || "results"}.xlsx`;
+}
+
 function statusLabel(status: ConnectionStatus["status"]) {
   const labels: Record<ConnectionStatus["status"], string> = {
     starting: "Memulai",
@@ -94,6 +102,7 @@ export default function Home() {
   const [hasMoreConversations, setHasMoreConversations] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -132,7 +141,10 @@ export default function Home() {
       const result = await request<Message[]>(
         `/wa/conversations/${encodeURIComponent(conversation.id)}/messages?${params}`,
       );
-      setMessages((current) => (append ? [...current, ...(result.data ?? [])] : (result.data ?? [])));
+      setMessages((current) => {
+        const next = append ? [...current, ...(result.data ?? [])] : (result.data ?? []);
+        return [...new Map(next.map((message) => [message.id, message])).values()];
+      });
       setMessageOffset(offset);
       setHasMoreMessages(result.pagination?.hasMore ?? false);
     },
@@ -171,6 +183,48 @@ export default function Home() {
     });
   }, [loadMessages, selectedConversation]);
 
+  useEffect(() => {
+    if (connection?.status !== "ready") return;
+
+    const timer = window.setInterval(() => {
+      void loadConversations(0, false, conversationQuery).catch((caught: unknown) =>
+        setError(caught instanceof Error ? caught.message : "Gagal memuat percakapan"),
+      );
+      if (globalSearchActive && globalQuery.trim()) {
+        const params = new URLSearchParams({
+          q: globalQuery.trim(),
+          limit: String(PAGE_SIZE),
+          offset: "0",
+        });
+        void request<Message[]>(`/wa/messages?${params}`)
+          .then((result) => setGlobalMessages(result.data ?? []))
+          .catch((caught: unknown) =>
+            setError(caught instanceof Error ? caught.message : "Pencarian pesan gagal"),
+          );
+      } else if (selectedConversation) {
+        void loadMessages(
+          selectedConversation,
+          0,
+          false,
+          messageQuery,
+        ).catch((caught: unknown) =>
+          setError(caught instanceof Error ? caught.message : "Gagal memuat pesan"),
+        );
+      }
+    }, 30_000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    connection?.status,
+    conversationQuery,
+    globalQuery,
+    globalSearchActive,
+    loadConversations,
+    loadMessages,
+    messageQuery,
+    selectedConversation,
+  ]);
+
   const selectedTitle = useMemo(
     () => selectedConversation?.display_name || selectedConversation?.phone_number || "Pilih percakapan",
     [selectedConversation],
@@ -193,8 +247,9 @@ export default function Home() {
 
   async function runSync() {
     setBusy(true);
+    setSyncing(true);
     setError("");
-    setNotice("");
+    setNotice("Sinkronisasi berjalan. Mohon tunggu, proses ini dapat memerlukan beberapa menit.");
     try {
       const result = await request<{
         chatsFound: number;
@@ -213,6 +268,7 @@ export default function Home() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Sinkronisasi WhatsApp gagal");
     } finally {
+      setSyncing(false);
       setBusy(false);
     }
   }
@@ -281,7 +337,7 @@ export default function Home() {
       const downloadUrl = URL.createObjectURL(file);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = "whatsapp-search-results.xlsx";
+      link.download = exportFileName(query);
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
       setNotice("File Excel hasil pencarian berhasil diunduh.");
@@ -320,8 +376,9 @@ export default function Home() {
           <button className="button button-primary" disabled={busy} onClick={() => void runAction("connect")}>
             Hubungkan
           </button>
-          <button className="button button-secondary" disabled={busy || connection?.status !== "ready"} onClick={() => void runSync()}>
-            Sync sekarang
+          <button aria-busy={syncing} className="button button-secondary" disabled={busy || connection?.status !== "ready"} onClick={() => void runSync()}>
+            {syncing && <span aria-hidden="true" className="button-spinner" />}
+            {syncing ? "Sedang sync..." : "Sync sekarang"}
           </button>
           <button className="button button-danger" disabled={busy} onClick={() => void runAction("disconnect")}>
             Putuskan
@@ -338,7 +395,7 @@ export default function Home() {
       </div>
 
       {(error || notice) && (
-        <div className={`feedback ${error ? "feedback-error" : "feedback-success"}`} role="status">
+        <div className={`feedback ${error ? "feedback-error" : syncing ? "feedback-loading" : "feedback-success"}`} role="status">
           <span>{error || notice}</span>
           <button
             aria-label="Tutup notifikasi"
@@ -350,6 +407,29 @@ export default function Home() {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {syncing && (
+        <div className="sync-modal-backdrop" role="presentation">
+          <section
+            aria-labelledby="sync-modal-title"
+            aria-describedby="sync-modal-description"
+            aria-modal="true"
+            className="sync-modal"
+            role="dialog"
+          >
+            <div aria-hidden="true" className="sync-modal-spinner" />
+            <p className="eyebrow">SINKRONISASI WHATSAPP</p>
+            <h2 id="sync-modal-title">Sedang mengambil data terbaru</h2>
+            <p id="sync-modal-description">
+              Mohon tunggu. Percakapan dan pesan sedang disinkronkan, proses ini bisa memerlukan beberapa menit.
+            </p>
+            <div aria-label="Sinkronisasi sedang berlangsung" className="sync-progress-track" role="progressbar">
+              <span />
+            </div>
+            <span className="sync-modal-footnote">Jangan tutup halaman ini</span>
+          </section>
         </div>
       )}
 

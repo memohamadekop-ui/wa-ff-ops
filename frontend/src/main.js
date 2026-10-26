@@ -18,6 +18,7 @@ let messageOffset = 0;
 let hasMoreConversations = false;
 let hasMoreMessages = false;
 let statusTimer = 0;
+let dataTimer = 0;
 let busy = false;
 
 function escapeHtml(value) {
@@ -43,6 +44,14 @@ function formatDate(value) {
   }).format(date);
 }
 
+function exportFileName(query) {
+  const safeQuery = query
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return `whatsapp-search-results_search_${safeQuery || "results"}.xlsx`;
+}
+
 function statusLabel(status) {
   return {
     starting: "Memulai",
@@ -56,6 +65,7 @@ function statusLabel(status) {
 
 function showLogin(message = "") {
   window.clearInterval(statusTimer);
+  window.clearInterval(dataTimer);
   root.innerHTML = `
     <main class="login-shell">
       <section class="login-card">
@@ -130,6 +140,16 @@ function renderDashboard() {
       </header>
       <div class="demo-banner"><span aria-hidden="true">i</span><p>Akses terbatas ke akun yang diizinkan. Halaman ini hanya menampilkan riwayat; tidak ada fitur kirim pesan.</p></div>
       <div id="feedback" class="feedback hidden" role="status"></div>
+      <div id="sync-modal" class="sync-modal-backdrop hidden" role="presentation">
+        <section class="sync-modal" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title" aria-describedby="sync-modal-description">
+          <div class="sync-modal-spinner" aria-hidden="true"></div>
+          <p class="eyebrow">SINKRONISASI WHATSAPP</p>
+          <h2 id="sync-modal-title">Sedang mengambil data terbaru</h2>
+          <p id="sync-modal-description">Mohon tunggu. Percakapan dan pesan sedang disinkronkan, proses ini bisa memerlukan beberapa menit.</p>
+          <div class="sync-progress-track" role="progressbar" aria-label="Sinkronisasi sedang berlangsung"><span></span></div>
+          <span class="sync-modal-footnote">Jangan tutup halaman ini</span>
+        </section>
+      </div>
       <section class="connection-card">
         <div>
           <p class="eyebrow">KONEKSI PERANGKAT</p>
@@ -207,13 +227,14 @@ function renderDashboard() {
   void refreshStatus();
   void loadConversations();
   statusTimer = window.setInterval(() => void refreshStatus(), 5000);
+  dataTimer = window.setInterval(() => void refreshData(), 30000);
 }
 
-function showFeedback(message, isError = false) {
+function showFeedback(message, isError = false, isLoading = false) {
   const feedback = document.querySelector("#feedback");
   if (!feedback) return;
   feedback.textContent = message;
-  feedback.className = `feedback ${isError ? "feedback-error" : "feedback-success"}`;
+  feedback.className = `feedback ${isError ? "feedback-error" : isLoading ? "feedback-loading" : "feedback-success"}`;
 }
 
 async function api(path, options = {}) {
@@ -332,12 +353,37 @@ async function loadMessages(conversation, offset = 0, append = false, query = ""
     const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
     if (query) params.set("q", query);
     const result = await api(`/wa/conversations/${encodeURIComponent(conversation.id)}/messages?${params}`);
-    messages = append ? [...messages, ...result.data] : result.data;
+    const next = append ? [...messages, ...result.data] : result.data;
+    messages = [...new Map(next.map((message) => [message.id, message])).values()];
     messageOffset = offset;
     hasMoreMessages = result.pagination?.hasMore ?? false;
     renderMessages();
   } catch (error) {
     showFeedback(error.message || "Gagal memuat riwayat pesan.", true);
+  }
+}
+
+async function refreshData() {
+  if (connection?.status !== "ready") return;
+  await loadConversations(0, false, document.querySelector("#conversation-query").value.trim());
+  if (globalSearchActive) {
+    const query = document.querySelector("#global-query").value.trim();
+    if (!query) return;
+    try {
+      const params = new URLSearchParams({ q: query, limit: String(pageSize), offset: "0" });
+      const result = await api(`/wa/messages?${params}`);
+      globalMessages = result.data;
+      renderMessages();
+    } catch (error) {
+      showFeedback(error.message || "Pencarian pesan gagal.", true);
+    }
+  } else if (selectedConversation) {
+    await loadMessages(
+      selectedConversation,
+      0,
+      false,
+      document.querySelector("#chat-query").value.trim(),
+    );
   }
 }
 
@@ -420,7 +466,7 @@ async function exportSearch(query, conversationId) {
     const url = URL.createObjectURL(await response.blob());
     const link = document.createElement("a");
     link.href = url;
-    link.download = "whatsapp-search-results.xlsx";
+    link.download = exportFileName(query);
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showFeedback("File Excel hasil pencarian berhasil diunduh.");
@@ -438,13 +484,27 @@ async function runAction(action) {
 }
 
 async function runSync() {
-  await withBusy(async () => {
-    const result = await api("/wa/sync", { method: "POST" });
-    const sync = result.data;
-    showFeedback(`Sync selesai: ${sync.inserted} pesan baru, ${sync.duplicates} duplikat. ${sync.directChats} dari ${sync.chatsFound} chat diperiksa.`);
-    await loadConversations();
-    if (selectedConversation) await loadMessages(selectedConversation);
-  });
+  const button = document.querySelector("#sync-button");
+  const modal = document.querySelector("#sync-modal");
+  const label = button.textContent;
+  button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span> Sedang sync...';
+  button.setAttribute("aria-busy", "true");
+  modal.classList.remove("hidden");
+  document.body.classList.add("sync-in-progress");
+  try {
+    await withBusy(async () => {
+      const result = await api("/wa/sync", { method: "POST" });
+      const sync = result.data;
+      showFeedback(`Sync selesai: ${sync.inserted} pesan baru, ${sync.duplicates} duplikat. ${sync.directChats} dari ${sync.chatsFound} chat diperiksa.`);
+      await loadConversations();
+      if (selectedConversation) await loadMessages(selectedConversation);
+    });
+  } finally {
+    modal.classList.add("hidden");
+    document.body.classList.remove("sync-in-progress");
+    button.textContent = label;
+    button.removeAttribute("aria-busy");
+  }
 }
 
 async function withBusy(action) {

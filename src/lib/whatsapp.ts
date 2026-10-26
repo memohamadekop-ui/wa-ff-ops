@@ -272,6 +272,40 @@ async function toStoredMessage(
   };
 }
 
+async function persistLiveMessage(
+  client: Client,
+  message: Message,
+  phoneCache: Map<string, string | null>,
+) {
+  const chat = await message.getChat();
+  const chatId = chat.id?._serialized ?? "";
+  if (
+    chat.isGroup ||
+    !(
+      chatId.endsWith("@c.us") ||
+      chatId.endsWith("@s.whatsapp.net") ||
+      chatId.endsWith("@lid")
+    )
+  ) {
+    return;
+  }
+
+  const phoneNumber = await conversationNumber(client, chat, phoneCache);
+  if (!phoneNumber) return;
+  const conversation = await findOrCreateConversation(
+    phoneNumber,
+    chat.name?.trim() || null,
+  );
+  const stored = await toStoredMessage(
+    client,
+    message,
+    conversation.id,
+    chat.name?.trim() || null,
+    phoneCache,
+  );
+  if (stored) await persistWhatsAppMessages([stored]);
+}
+
 async function synchronizeChats(): Promise<SyncResult> {
   const client = globalState.waClient;
   if (!client || state().status !== "ready") {
@@ -435,6 +469,18 @@ export async function startWhatsApp() {
     globalState.waClient = client;
     updateState({ status: "starting", qrCode: null, lastError: null });
 
+    const liveMessagePhoneCache = new Map<string, string | null>();
+    const handleLiveMessage = (message: Message) => {
+      void persistLiveMessage(client, message, liveMessagePhoneCache).catch(
+        (error: unknown) => {
+          console.error(
+            `Could not persist live WhatsApp message ${JSON.stringify(errorDetails(error))}`,
+          );
+        },
+      );
+    };
+    client.on("message", handleLiveMessage);
+    client.on("message_create", handleLiveMessage);
     client.on("qr", (qr) => updateState({ status: "qr", qrCode: qr, lastError: null }));
     client.on("authenticated", () =>
       updateState({ status: "authenticated", qrCode: null, lastError: null }),

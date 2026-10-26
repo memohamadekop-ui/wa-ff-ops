@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { authorizeOcc } from "@/lib/auth";
 import { jsonError } from "@/lib/http";
 import {
+  includeMessageReplies,
   ilikePattern,
   SupabaseError,
   supabaseRequest,
@@ -35,6 +36,41 @@ function formatWhatsAppTimestamp(value: string) {
   }).format(new Date(value));
 }
 
+function excelTimestamp(value: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(value))
+      .map(({ type, value }) => [type, value]),
+  );
+  return new Date(
+    Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+    ),
+  );
+}
+
+function exportFileName(query: string) {
+  const safeQuery = query
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return `whatsapp-search-results_search_${safeQuery || "results"}.xlsx`;
+}
+
 function lidIdFromMessage(message: MessageRow) {
   const match = message.external_id?.match(/^(?:true|false)_(\d+@lid)_/);
   return match?.[1] ?? null;
@@ -59,7 +95,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const messages: MessageRow[] = [];
+    let messages: MessageRow[] = [];
     let offset = 0;
     while (messages.length <= MAX_EXPORT_ROWS) {
       const limit = Math.min(PAGE_SIZE, MAX_EXPORT_ROWS + 1 - messages.length);
@@ -81,6 +117,15 @@ export async function GET(request: NextRequest) {
       if (page.length < limit) break;
       offset += page.length;
     }
+
+    messages = await includeMessageReplies(messages);
+    messages.sort((a, b) =>
+      conversationId
+        ? Date.parse(a.message_at) - Date.parse(b.message_at) ||
+          a.id.localeCompare(b.id)
+        : Date.parse(b.message_at) - Date.parse(a.message_at) ||
+          b.id.localeCompare(a.id),
+    );
 
     const conversationIds = [...new Set(messages.map((message) => message.conversation_id))];
     const lidIds = messages
@@ -132,7 +177,7 @@ export async function GET(request: NextRequest) {
           : phoneNumber ||
             message.sender_name ||
             "Tidak diketahui";
-      const timestamp = new Date(message.message_at);
+      const timestamp = excelTimestamp(message.message_at);
       const body = message.body || "[pesan tanpa teks]";
       worksheet.addRow({
         timestamp,
@@ -156,7 +201,7 @@ export async function GET(request: NextRequest) {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": 'attachment; filename="whatsapp-search-results.xlsx"',
+        "Content-Disposition": `attachment; filename="${exportFileName(search)}"`,
         "Cache-Control": "no-store",
       },
     });

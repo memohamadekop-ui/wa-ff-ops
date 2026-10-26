@@ -84,11 +84,17 @@ async function proxy(request: NextRequest, context: Context) {
   target.search = request.nextUrl.search;
 
   try {
+    const timeoutMs =
+      path[0] === "wa" && path[1] === "sync"
+        ? 300_000
+        : path[2] === "export"
+          ? 120_000
+          : 20_000;
     const upstream = await fetch(target, {
       method: request.method,
       headers: { "x-occ-backend-secret": secret },
       cache: "no-store",
-      signal: AbortSignal.timeout(path[2] === "export" ? 120_000 : 20_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return new Response(upstream.body, {
       status: upstream.status,

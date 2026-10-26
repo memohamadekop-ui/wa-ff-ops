@@ -7,6 +7,7 @@ import {
 } from "@/lib/http";
 import {
   ilikePattern,
+  includeMessageReplies,
   SupabaseError,
   supabaseRequest,
   type MessageRow,
@@ -34,8 +35,15 @@ export async function GET(request: NextRequest) {
       limit: pagination.limit + 1,
       offset: pagination.offset,
     });
+    const matchingRows = rows.slice(0, pagination.limit);
     const hasMore = rows.length > pagination.limit;
-    return jsonSuccess(rows.slice(0, pagination.limit), {
+    const results = await includeMessageReplies(matchingRows);
+    results.sort(
+      (a, b) =>
+        Date.parse(b.message_at) - Date.parse(a.message_at) ||
+        b.id.localeCompare(a.id),
+    );
+    return jsonSuccess(results, {
       pagination: paginationResult(pagination.limit, pagination.offset, hasMore),
     });
   } catch (error) {

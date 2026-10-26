@@ -12,6 +12,20 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: wait; opacity: .6; }
 .hidden { display: none !important; }
+body.sync-in-progress { overflow: hidden; }
+.sync-modal-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(17 35 28 / 48%); backdrop-filter: blur(4px); }
+.sync-modal { width: min(440px, 100%); padding: 36px 32px 30px; border: 1px solid rgb(255 255 255 / 75%); border-radius: 20px; background: white; box-shadow: 0 24px 80px rgb(14 37 27 / 22%); text-align: center; animation: sync-modal-enter .2s ease-out; }
+.sync-modal-spinner { width: 52px; height: 52px; margin: 0 auto 22px; border: 4px solid #e5f2eb; border-top-color: #087f5b; border-radius: 50%; animation: sync-spin .85s linear infinite; }
+.sync-modal .eyebrow { margin-bottom: 9px; color: #087f5b; }
+.sync-modal h2 { margin: 0; color: #172b26; font-size: 21px; letter-spacing: -.035em; }
+.sync-modal > p:not(.eyebrow) { margin: 11px 0 22px; color: #71817b; font-size: 13px; line-height: 1.65; }
+.sync-progress-track { height: 6px; overflow: hidden; border-radius: 99px; background: #eaf2ed; }
+.sync-progress-track span { display: block; width: 38%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #087f5b, #52bd8e); animation: sync-progress 1.5s ease-in-out infinite; }
+.sync-modal-footnote { display: inline-block; margin-top: 17px; color: #96a39c; font-size: 11px; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+@keyframes sync-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(280%); } }
+@keyframes sync-modal-enter { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .sync-modal, .sync-modal-spinner, .sync-progress-track span { animation-duration: .01ms; animation-iteration-count: 1; } }
 .app-shell { max-width: 1500px; min-height: 100vh; margin: 0 auto; padding: 26px 40px 18px; }
 .topbar, .brand, .connection-actions, .panel-heading, .message-meta { display: flex; align-items: center; }
 .topbar { justify-content: space-between; gap: 20px; margin-bottom: 22px; }
@@ -22,6 +36,8 @@ button:disabled { cursor: wait; opacity: .6; }
 .eyebrow { margin: 0 0 5px; color: #86948e; font-size: 10px; font-weight: 700; letter-spacing: .13em; }
 .connection-actions { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .button { min-height: 38px; padding: 0 13px; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 700; }
+.button-spinner { display: inline-block; width: 13px; height: 13px; margin-right: 5px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: button-spin .7s linear infinite; }
+@keyframes button-spin { to { transform: rotate(360deg); } }
 .button-primary { background: #087f5b; color: white; }
 .button-primary:hover:not(:disabled) { background: #066b4d; }
 .button-secondary { border-color: #e8eeeb; background: white; color: #40524b; }
@@ -38,6 +54,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .feedback { justify-content: space-between; margin: 0 0 14px; }
 .feedback-error { border: 1px solid #f0d2d0; background: #fff6f5; color: #a7443d; }
 .feedback-success { border: 1px solid #cce8da; background: #f1fbf5; color: #237653; }
+.feedback-loading { border: 1px solid #d8e5f4; background: #f3f8ff; color: #42658e; }
 .feedback-close { border: 0; background: transparent; color: inherit; font-size: 19px; line-height: 1; }
 .connection-card, .conversation-panel, .message-panel { overflow: hidden; border: 1px solid #e8eeeb; border-radius: 14px; background: white; box-shadow: 0 4px 18px #203b2d06; }
 .connection-card { display: flex; min-height: 164px; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 21px 25px; }

@@ -30,6 +30,9 @@ export type NewWhatsAppMessage = Omit<
   "id" | "created_at" | "import_batch_id"
 >;
 
+const MESSAGE_REPLY_WINDOW_MS = 30 * 60 * 1000;
+const MESSAGE_REPLY_CONCURRENCY = 5;
+
 export class SupabaseError extends Error {
   constructor(
     message: string,
@@ -255,6 +258,51 @@ export function persistWhatsAppMessages(messages: NewWhatsAppMessage[]) {
     () => undefined,
   );
   return operation;
+}
+
+export async function includeMessageReplies(messages: MessageRow[]) {
+  const replies = new Map<string, MessageRow>();
+  const candidates = messages.filter(
+    (message) =>
+      (message.direction === "inbound" || message.direction === "outbound") &&
+      Number.isFinite(Date.parse(message.message_at)),
+  );
+
+  for (
+    let index = 0;
+    index < candidates.length;
+    index += MESSAGE_REPLY_CONCURRENCY
+  ) {
+    const batch = candidates.slice(index, index + MESSAGE_REPLY_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (message) => {
+        const repliedBy =
+          message.direction === "inbound" ? "outbound" : "inbound";
+        const replyAfter = new Date(message.message_at);
+        const replyBefore = new Date(
+          replyAfter.getTime() + MESSAGE_REPLY_WINDOW_MS,
+        );
+        const rows = await supabaseRequest<MessageRow[]>("wa_messages", {
+          select: "*",
+          conversation_id: `eq.${message.conversation_id}`,
+          direction: `eq.${repliedBy}`,
+          or: `(message_at.gt.${message.message_at},and(message_at.eq.${message.message_at},id.gt.${message.id}))`,
+          message_at: `lte.${replyBefore.toISOString()}`,
+          order: "message_at.asc,id.asc",
+          limit: 1,
+        });
+        return rows[0];
+      }),
+    );
+
+    for (const reply of results) {
+      if (reply) replies.set(reply.id, reply);
+    }
+  }
+
+  const combined = new Map(messages.map((message) => [message.id, message]));
+  for (const reply of replies.values()) combined.set(reply.id, reply);
+  return [...combined.values()];
 }
 
 export function ilikePattern(value: string) {
